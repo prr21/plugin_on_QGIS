@@ -173,20 +173,81 @@ class Exprience:
         # will be set False in run()
         self.first_start = True
 
+    def checkOnErrors(self,layer,dp):
+        if layer.geometryType() != 0:
+            self.iface.messageBar().pushMessage("Выберите слой с точками!", Qgis.Warning )
+            return False
+
+        elif dp.fieldNameIndex('xcoord') == -1:
+            self.lostAttr('xcoord')
+            return False
+
+        elif dp.fieldNameIndex('ycoord') == -1:
+            self.lostAttr('ycoord')
+            return False
+
+        else: return True
+
+    def fillAttr(self,features, dp):
+        uselessPoint = self.dlg.checkBox
+        uselessAttr = self.dlg.checkBox_2
+
+        xAttrInd = dp.fieldNameIndex('xcoord_grds')
+        yAttrInd = dp.fieldNameIndex('ycoord_grds')
+
+        if uselessAttr.checkState() != 0: self.deleteUselessAttr(dp,xAttrInd,yAttrInd)
+
+        for feat in features:
+            valX = feat.attribute('xcoord')
+            valY = feat.attribute('ycoord')
+
+            zero = feat.attribute('distance')
+            if uselessPoint.checkState() != 0 and zero <= 0:
+                dp.deleteFeatures([ feat.id() ])
+                continue
+
+            gradsX = self.convertToGraduses( valX )
+            gradsY = self.convertToGraduses( valY )
+
+            newXAttr = {xAttrInd : gradsX }
+            newYAttr = {yAttrInd : gradsY }
+
+            dp.changeAttributeValues({ feat.id(): newXAttr })
+            dp.changeAttributeValues({ feat.id(): newYAttr })
+
+    def deleteUselessAttr(self,dp,xgInd,ygInd):
+        aInd = dp.fieldNameIndex('angle')
+        dInd = dp.fieldNameIndex('distance')
+        xInd = dp.fieldNameIndex('xcoord')
+        yInd = dp.fieldNameIndex('ycoord')
+
+        allList = dp.attributeIndexes()
+        whiteList = [aInd,dInd,xInd,yInd]
+        
+        for attr in allList:
+            if attr in whiteList:
+                continue
+            # dp.deleteAttributes([attr])
 
     def convertToGraduses(self,ddd):
+        def toFixed(numObj, digits=0):
+            return f"{numObj:.{digits}f}"
+
+        countMs = self.dlg.spinBox.value()
+
         dd = math.trunc(ddd)                 # DD = TRUNC(DDD)
         mm = math.trunc( (ddd - dd) * 60 )   # MM = TRUNC((DDD − DD) * 60)
         ss = ( (ddd-dd) * 60 - mm ) * 60     # SS = ((DDD − DD) * 60 − MM) * 60
 
+        ss = toFixed(ss,countMs)
         ss = str(ss).replace('.', '\" ')
 
         grads = str(dd)+'° '+str(mm)+" \' "+ss
 
         return grads
 
-    def lostAttr(self,atr):
-        self.iface.messageBar().pushMessage("Отсуствуют необходимый атрибут " + atr + " с координатами", Qgis.Warning )
+    def lostAttr(self,attr):
+        self.iface.messageBar().pushMessage("Отсуствуют необходимый атрибут " + attr + " с координатами", Qgis.Warning )
         return
 
     def createField(self,dp,way):
@@ -210,61 +271,37 @@ class Exprience:
             self.first_start = False
             self.dlg = ExprienceDialog()
 
+        cmBox = self.dlg.comboBox
+        cmBox.clear()
         # show the dialog
         self.dlg.show()
-        # Run the dialog event loop
-        result = self.dlg.exec_()
         
+        AllLayers = self.iface.mapCanvas().layers()
+        showLayers = []
+        for l in AllLayers:
+            showLayers.append(l.name())
+
+        cmBox.addItems(showLayers)
+
+        result = self.dlg.exec_()
+
         if result:
-            layer = self.iface.activeLayer()
+
+            layer = AllLayers[ cmBox.currentIndex() ]
+
             if not layer:
                 self.iface.messageBar().pushMessage("Слоёв нет, бетюша", Qgis.Critical )
                 return
 
             dp = layer.dataProvider()
+            if not self.checkOnErrors(layer,dp): return
 
-            if layer.geometryType() != 0:
-                self.iface.messageBar().pushMessage("Выберите слой с точками!", Qgis.Warning )
-                return
-            elif dp.fieldNameIndex('xcoord') == -1:
-                self.lostAttr('xcoord')
-                return
-            elif dp.fieldNameIndex('ycoord') == -1:
-                self.lostAttr('ycoord')
-                return
-
-            if dp.fieldNameIndex('xcoord_grds') == -1:
-                self.createField(dp,'xcoord_grds')
-
-            if dp.fieldNameIndex('ycoord_grds') == -1:
-                self.createField(dp,'ycoord_grds')
-
-            if True:
-                pass
+            if dp.fieldNameIndex('xcoord_grds') == -1: self.createField(dp,'xcoord_grds')
+            if dp.fieldNameIndex('ycoord_grds') == -1: self.createField(dp,'ycoord_grds')
 
             features = layer.getFeatures()
-            for feat in features:
-                xAttrInd = dp.fieldNameIndex('xcoord_grds')
-                yAttrInd = dp.fieldNameIndex('ycoord_grds')
 
-                zero = feat.attribute('distance')
-
-                if zero <= 0:
-                    dp.deleteFeatures([ feat.id() ])
-                    print('deleted')
-                    return
-
-                valX = feat.attribute('xcoord')
-                valY = feat.attribute('ycoord')
-
-                gradsX = self.convertToGraduses( valX )
-                gradsY = self.convertToGraduses( valY )
-
-                newXAttr = {xAttrInd : gradsX }
-                newYAttr = {yAttrInd : gradsY }
-
-                dp.changeAttributeValues({ feat.id(): newXAttr })
-                dp.changeAttributeValues({ feat.id(): newYAttr })
+            self.fillAttr(features, dp)
 
             layer.updateFields()
-            self.iface.messageBar().pushMessage("Значения обновлены!", Qgis.Success )
+            self.iface.messageBar().pushMessage("Координаты обновлены!", Qgis.Success )
