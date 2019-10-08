@@ -33,7 +33,7 @@ from .resources import *
 from .prr_dialog import ExprienceDialog
 import os.path
 import qgis.utils
-from random import random
+import math
 
 class Exprience:
     """QGIS Plugin Implementation."""
@@ -174,16 +174,24 @@ class Exprience:
         self.first_start = True
 
 
-    def calcShit(self,x,y):
-        res = round(x*y)
-        return res
+    def convertToGraduses(self,ddd):
+        dd = math.trunc(ddd)                 # DD = TRUNC(DDD)
+        mm = math.trunc( (ddd - dd) * 60 )   # MM = TRUNC((DDD − DD) * 60)
+        ss = ( (ddd-dd) * 60 - mm ) * 60     # SS = ((DDD − DD) * 60 − MM) * 60
+
+        ss = str(ss).replace('.', '\" ')
+
+        grads = str(dd)+'° '+str(mm)+" \' "+ss
+
+        return grads
 
     def lostAttr(self,atr):
-        self.iface.messageBar().pushMessage("Отсуствуют необходимые атрибуты (" + atr + ")", Qgis.Warning )
+        self.iface.messageBar().pushMessage("Отсуствуют необходимый атрибут " + atr + " с координатами", Qgis.Warning )
         return
 
-    def createField():
-        dp.addAttributes([QgsField('Multiply',QVariant.Int)])
+    def createField(self,dp,way):
+        print('Created new Attribute \"' +way+'\"')
+        dp.addAttributes([QgsField(way,QVariant.String)])
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
@@ -206,38 +214,57 @@ class Exprience:
         self.dlg.show()
         # Run the dialog event loop
         result = self.dlg.exec_()
-        # See if OK was pressed
+        
         if result:
             layer = self.iface.activeLayer()
+            if not layer:
+                self.iface.messageBar().pushMessage("Слоёв нет, бетюша", Qgis.Critical )
+                return
+
             dp = layer.dataProvider()
 
             if layer.geometryType() != 0:
                 self.iface.messageBar().pushMessage("Выберите слой с точками!", Qgis.Warning )
                 return
-            elif dp.fieldNameIndex('distance') == -1:
-                self.lostAttr('distance')
+            elif dp.fieldNameIndex('xcoord') == -1:
+                self.lostAttr('xcoord')
                 return
-            elif dp.fieldNameIndex('angle') == -1:
-                self.lostAttr('angle')
+            elif dp.fieldNameIndex('ycoord') == -1:
+                self.lostAttr('ycoord')
                 return
-            elif dp.fieldNameIndex('multiply') == -1:
-                self.createField(dp)
+
+            if dp.fieldNameIndex('xcoord_grds') == -1:
+                self.createField(dp,'xcoord_grds')
+
+            if dp.fieldNameIndex('ycoord_grds') == -1:
+                self.createField(dp,'ycoord_grds')
+
+            if True:
+                pass
 
             features = layer.getFeatures()
-            index = 0
+            for feat in features:
+                xAttrInd = dp.fieldNameIndex('xcoord_grds')
+                yAttrInd = dp.fieldNameIndex('ycoord_grds')
 
-            for n in features:
-                attrInd = dp.fieldNameIndex('multiply')
-                dst = n.attribute('distance')
-                ang = n.attribute('angle')
+                zero = feat.attribute('distance')
 
-                valAttr = self.calcShit( dst,ang )
+                if zero <= 0:
+                    dp.deleteFeatures([ feat.id() ])
+                    print('deleted')
+                    return
 
-                if valAttr == 0:
-                    dp.deleteFeatures([ n.id() ])
+                valX = feat.attribute('xcoord')
+                valY = feat.attribute('ycoord')
 
-                multpAttr = {attrInd : valAttr}
-                dp.changeAttributeValues({ n.id(): multpAttr })
+                gradsX = self.convertToGraduses( valX )
+                gradsY = self.convertToGraduses( valY )
+
+                newXAttr = {xAttrInd : gradsX }
+                newYAttr = {yAttrInd : gradsY }
+
+                dp.changeAttributeValues({ feat.id(): newXAttr })
+                dp.changeAttributeValues({ feat.id(): newYAttr })
 
             layer.updateFields()
             self.iface.messageBar().pushMessage("Значения обновлены!", Qgis.Success )
